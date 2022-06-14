@@ -1,0 +1,224 @@
+# Copyright 2019 Amazon.com, Inc. and its affiliates. All Rights Reserved.
+#
+# Licensed under the Amazon Software License (the 'License').
+# You may not use this file except in compliance with the License.
+# A copy of the License is located at
+#
+#   http://aws.amazon.com/asl/
+#
+# or in the 'license' file accompanying this file. This file is distributed
+# on an 'AS IS' BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either
+# express or implied. See the License for the specific language governing
+# permissions and limitations under the License.
+
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "IoT multi branch Pipeline Template"
+
+Parameters:
+
+  RepositoryName:
+    Type:  String
+    Default: "aws-iot-device-sdk-embedded-C-simple-device"
+  BranchName:
+    Type:  String
+    Default: "master"
+  Setup:
+    Type: String
+    Default: false
+
+
+Conditions: 
+  BranchMaster: !Equals [ !Ref BranchName, "master" ]
+  BranchDevelop: !Equals [ !Ref BranchName, "develop"]
+  Setup: !Equals [ !Ref Setup, true ]
+
+
+Resources:
+
+
+#----------------------------------------------------------------------#
+# Resource CodePipeline
+#----------------------------------------------------------------------#
+  Pipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Join ['-', [!Ref RepositoryName, !Ref BranchName]]
+      RoleArn: !Sub 'arn:aws:iam::${AWS::AccountId}:role/IoTCodePipelineRole'
+      ArtifactStore:
+        Type: S3
+        Location: !Sub '${AWS::AccountId}-iot-multi-branchs-pipeline'
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: App
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: CodeCommit
+              Configuration:
+                RepositoryName: !Ref RepositoryName
+                BranchName: !Ref BranchName
+              OutputArtifacts:
+                - Name: SourceArtifact 
+              RunOrder: 1
+
+
+
+#----------------------------------------------------------------------#
+# Regardless of branch type, the Code build Stage will always be created.
+#----------------------------------------------------------------------#
+        - Name: Code-Build
+          Actions:
+            - Name: Code-Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: "1"
+                Provider: CodeBuild
+              OutputArtifacts:
+                - Name: BuildArtifact
+              InputArtifacts:
+                - Name: SourceArtifact 
+              Configuration:
+                ProjectName: !Join ['-', [!Ref 'RepositoryName', 'CodeBuild' ]]
+              RunOrder: 1
+
+#----------------------------------------------------------------------#
+# Regardless of branch type, the Code build Stage will always be created.
+#----------------------------------------------------------------------#
+        - Name: Manual-Approval
+          Actions:
+            - Name: Manual-Approval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: "1"
+                Provider: Manual
+              Configuration:
+                NotificationArn: 'arn:aws:sns:us-west-2:776353586321:IoT_Pipeline'
+                ExternalEntityLink: 'http://example.com'
+              RunOrder: 1
+
+
+#----------------------------------------------------------------------#
+# If BranchName= Develop, then create the CD Stage to deploy to Dev S3
+#----------------------------------------------------------------------#
+        - !If 
+          - BranchDevelop
+          - Name: Deploy
+            Actions: 
+            - Name: DeployToDevS3-OTA
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              InputArtifacts:
+                - Name: BuildArtifact 
+              Configuration:
+                BucketName: iot-things-ota
+                ObjectKey: Firmware
+                Extract: true
+              RunOrder: 1
+              Region: us-west-2
+          - !Ref AWS::NoValue 
+
+#----------------------------------------------------------------------#
+# If BranchName=Master, then create the CD Stage to deploy to Prod S3
+#----------------------------------------------------------------------#
+        - !If 
+          - BranchMaster
+          - Name: Deploy
+            Actions: 
+            - Name: DeployToProdS3-OTA
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: "1"
+                Provider: S3
+              InputArtifacts:
+                - Name: BuildArtifact 
+              Configuration:
+                BucketName: iot-things-ota
+                ObjectKey: Firmware
+                Extract: true
+              RunOrder: 1
+              Region: us-west-2
+          - !Ref AWS::NoValue 
+          
+#----------------------------------------------------------------------#
+# If BranchName=BranchDevelop, then create OTA Stage to deploy to DEV OTA
+#----------------------------------------------------------------------#
+        - !If 
+          - BranchDevelop
+          - Name: OTA-Verify  
+            Actions: 
+            - Name: Dev-OTA-verify
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: "1"
+                Provider: Lambda
+              InputArtifacts:
+                - Name: BuildArtifact
+              OutputArtifacts:
+                - Name: simple_device_demo
+              Configuration:
+                FunctionName: MyIoTCreateOTAJob
+              RunOrder: 2
+              Region: us-west-2
+          - !Ref AWS::NoValue 
+
+#----------------------------------------------------------------------#
+# If BranchName=Master, then create OTA Stage to deploy to Prod OTA
+#----------------------------------------------------------------------#
+        - !If 
+          - BranchMaster
+          - Name: OTA-Verify  
+            Actions: 
+            - Name: Prod-OTA-verify
+              ActionTypeId:
+                Category: Invoke
+                Owner: AWS
+                Version: "1"
+                Provider: Lambda
+              InputArtifacts:
+                - Name: BuildArtifact 
+              OutputArtifacts:
+                - Name: simple_device_demo
+              Configuration:
+                FunctionName: MyIoTCreateOTAJob
+              RunOrder: 2
+              Region: us-west-2
+          - !Ref AWS::NoValue 
+
+
+
+#----------------------------------------------------------------------#
+# CodeBuild Projects
+#----------------------------------------------------------------------#
+  CodeBuild: 
+    Condition: Setup
+    Type: AWS::CodeBuild::Project 
+    Properties: 
+      Name: !Join ['-', [!Ref 'RepositoryName', 'CodeBuild' ]]
+      Source: 
+        Type: CODECOMMIT
+        Location: 'https://git-codecommit.us-west-2.amazonaws.com/v1/repos/aws-iot-device-sdk-embedded-C-simple-device'
+      Environment: 
+        Type: LINUX_CONTAINER 
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:4.0
+        EnvironmentVariables:         
+          - Name: BranchName 
+            Value: !Ref BranchName 
+      Artifacts: 
+        Type: S3
+        Location: iot-things-ota   
+        Name: simple_device_demo
+        Packaging: ZIP
+      ServiceRole: !Sub 'arn:aws:iam::${AWS::AccountId}:role/IoTCodeBuildRole'
+      TimeoutInMinutes: 10 
+
