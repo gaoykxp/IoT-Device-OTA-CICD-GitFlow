@@ -10,3 +10,6 @@ This repository provides an reference solution shows you how to deploy a continu
 * Multi-branch CodePipeline strategy follow GitFlow approach in Firmware development.
 
 The Detailed setup steps you can reference APG pattern [Deploy IoT Device OTA CICD Pipeline using AWS DevOps Tools](https://apg-library.amazonaws.com/content-viewer/author/430c89e4-eb00-4318-9b0c-d49b7f4a8113) 
+
+# License
+This library is licensed under the Amazon Software License, see License file
