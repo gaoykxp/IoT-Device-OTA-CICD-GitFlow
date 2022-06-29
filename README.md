@@ -1,7 +1,8 @@
 # IoT-Device-OTA-CICD-GitFlow
+
 This repository provides an reference solution shows you how to deploy a continuous integration / continuous delivery (CI/CD) IoT device OTA deployment pipeline using AWS DevOps tools. Also will present a multi-branch solution for automated pipelines creation in AWS CodePipeline when a new branch is created in an AWS CodeCommit repository. The strategy presented here is to make your IoT device firmware development follow the GitFlow approach using only AWS tools.
 
-##Solution Architecture
+# Solution Architecture
 
 * Leverage AWS DevOps tools  CodeCommit, CodeBuild, CodePipeline as a CI/CD solution.
 * Use AWS Signer to sign the firmware with ECDSA to guarantee the integrity and trusted author verification.
